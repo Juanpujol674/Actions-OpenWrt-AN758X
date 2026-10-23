@@ -11,6 +11,8 @@ echo "拉取可选插件 (diy-part1.sh)"
 echo "=========================================="
 PKG_DIR="package/custom"
 mkdir -p "$PKG_DIR"
+# Required packages are fetched before prepare-tmpinfo.
+bash "$GITHUB_WORKSPACE/scripts/fetch-required-packages.sh" || exit 1
 # ---------------------------------------------------------
 # 插件开关
 # 默认开启：Airoha SoC 状态页（config 里已 =y，必须拉否则 defconfig 会剔除）
@@ -89,7 +91,11 @@ if [ "$ADD_LUCI_APP" = "true" ]; then
       exit 1
     fi
     rm -rf "$PKG_DIR/$p"
-    cp -r "$LUCI_APP_TMP/$p" "$PKG_DIR/"
+    if [ "$p" = luci-app-pon-status ]; then
+      cp -a feeds/pon_userspace/luci-app-pon-status "$PKG_DIR/"
+    else
+      cp -a "$LUCI_APP_TMP/$p" "$PKG_DIR/"
+    fi
     echo "✅ 已拷贝: $p  (版本 $(grep -m1 '^PKG_VERSION' "$PKG_DIR/$p/Makefile" 2>/dev/null | sed 's/PKG_VERSION:=//'))"
   done
   rm -rf "$LUCI_APP_TMP"

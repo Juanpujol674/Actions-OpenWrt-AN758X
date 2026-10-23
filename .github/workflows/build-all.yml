@@ -1,0 +1,39 @@
+name: Build all devices (full bundle)
+on:
+  workflow_dispatch:
+  # Future schedule (UTC): 20:00 Sunday = Monday 04:00 Asia/Shanghai
+  # schedule:
+  #   - cron: '0 20 * * 0'
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: full-bundle-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  firmware:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        profile:
+          - fiberhome_hg5382a
+          - fiberhome_hg5585f-ct
+          - fiberhome_hg5585f-cu
+          - gemtek_xg2010g
+          - h3c_hm2004-du
+          - nokia_xg-040g-md-ubi
+          - nokia_xg-040g-mf
+          - nokia_xg-040g-mf-ubi
+          - nokia_xg-040g-tf-ubi
+          - unionman_ung00a
+          - znxt_zn504xg-d
+          - znxt_zn515xg-d
+    uses: ./.github/workflows/build-ponwrt.yml
+    with:
+      source: pbs05/ponwrt
+      profile: ${{ matrix.profile }}
+      private_repo: none
+      fw_author: Juanpujol674
+      upload_release: ${{ 'true' }}
+    secrets: inherit
