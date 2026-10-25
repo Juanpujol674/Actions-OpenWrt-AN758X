@@ -77,9 +77,11 @@ jobs:
           cp -a "$GITHUB_WORKSPACE/scripts/." ./scripts/
           mkdir -p files
           cp -a "$GITHUB_WORKSPACE/files/." ./files/
-          bash "$GITHUB_WORKSPACE/diy-part1.sh"
+          # DIY package replacement removes installed feed symlinks.
+          # Install feeds first so package/feeds exists and replacements win.
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          bash "$GITHUB_WORKSPACE/diy-part1.sh"
 
       - name: Combine device configs into single subtarget build
         shell: bash
