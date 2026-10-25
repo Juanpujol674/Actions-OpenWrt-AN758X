@@ -72,6 +72,10 @@ jobs:
       - name: Run existing DIY plugin preparation
         shell: bash
         working-directory: openwrt
+        env:
+          # None of the profiles in this workflow is the HM2004-DU FTTR device.
+          PROFILE: multi-${{ matrix.soc }}
+          ADD_FTTR: 'false'
         run: |
           set -euo pipefail
           cp -a "$GITHUB_WORKSPACE/scripts/." ./scripts/
