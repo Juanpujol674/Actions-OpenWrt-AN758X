@@ -1,0 +1,146 @@
+name: PonWrt Multi-profile (AN7581 + AN7583)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Build subtarget'
+        required: true
+        type: choice
+        options:
+          - both
+          - an7581
+          - an7583
+        default: both
+      publish_release:
+        description: 'Publish Release after successful build (turn on after validation)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# Do NOT cancel a long build when another dispatch is submitted.
+concurrency:
+  group: ponwrt-multiprofile-${{ github.ref }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  firmware:
+    name: firmware (${{ matrix.soc }}) / build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        soc: ${{ fromJSON(inputs.target == 'both' && '["an7581","an7583"]' || format('["{0}"]', inputs.target)) }}
+
+    steps:
+      - name: Check out CI configuration
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/share/powershell
+          df -h .
+
+      - name: Install OpenWrt build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses-dev libssl-dev python3 python3-pyelftools \
+            rsync unzip zlib1g-dev file wget curl xz-utils swig time cmake \
+            cpio patch autopoint libelf-dev device-tree-compiler
+
+      - name: Clone PonWrt source (master)
+        shell: bash
+        run: |
+          git clone --depth=1 --branch master https://github.com/pbs05/ponwrt.git openwrt
+          git -C openwrt log -1 --format='PonWrt commit: %H'
+
+      - name: Restore download cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: ponwrt-dl-${{ runner.os }}-${{ hashFiles('openwrt/feeds.conf.default') }}
+
+      - name: Run existing DIY plugin preparation
+        shell: bash
+        working-directory: openwrt
+        run: |
+          set -euo pipefail
+          cp -a "$GITHUB_WORKSPACE/scripts/." ./scripts/
+          mkdir -p files
+          cp -a "$GITHUB_WORKSPACE/files/." ./files/
+          bash "$GITHUB_WORKSPACE/diy-part1.sh"
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Combine device configs into single subtarget build
+        shell: bash
+        working-directory: openwrt
+        env:
+          SOC: ${{ matrix.soc }}
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/scripts/make-multiprofile-config.py" \
+            "$SOC" --configs "$GITHUB_WORKSPACE/configs" --output .config
+          # Keep the original P3TERX DIY order: run part2 after .config exists.
+          bash "$GITHUB_WORKSPACE/diy-part2.sh"
+          make defconfig
+          bash "$GITHUB_WORKSPACE/scripts/verify-multiprofile.sh" "$SOC"
+          echo 'Effective device selection:'
+          grep -E '^CONFIG_TARGET_(MULTI_PROFILE|DEVICE_airoha_)' .config
+
+      - name: Download packages
+        shell: bash
+        working-directory: openwrt
+        run: |
+          set -euo pipefail
+          make -j4 download
+          find dl -type f -size -1024c -delete || true
+
+      - name: Build all selected devices in ONE make
+        shell: bash
+        working-directory: openwrt
+        run: |
+          set -euo pipefail
+          # One complete make for the whole subtarget. Device image generation
+          # is handled by the OpenWrt multi-profile image rules.
+          make -j4
+
+      - name: Stage sysupgrade-only firmware
+        shell: bash
+        env:
+          SOC: ${{ matrix.soc }}
+        run: |
+          set -euo pipefail
+          python3 scripts/stage-only-upgrades.py "$SOC" \
+            --images "openwrt/bin/targets/airoha/$SOC" \
+            --output "release/$SOC"
+          find "release/$SOC" -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Upload firmware artifact (only sysupgrade files)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PonWrt-${{ matrix.soc }}-sysupgrade
+          path: release/${{ matrix.soc }}/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish platform release (optional)
+        if: ${{ inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: multi-${{ matrix.soc }}-${{ github.run_number }}
+          name: "PonWrt ${{ matrix.soc }} multi-profile #${{ github.run_number }}"
+          body: |
+            One build per subtarget. Contains ONLY sysupgrade images.
+            Verify the exact hardware profile, flash layout and bootloader before upgrading.
+          files: release/${{ matrix.soc }}/*
+          fail_on_unmatched_files: true
