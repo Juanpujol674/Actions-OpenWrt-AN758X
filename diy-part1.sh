@@ -91,10 +91,16 @@ if [ "$ADD_LUCI_APP" = "true" ]; then
       exit 1
     fi
     rm -rf "$PKG_DIR/$p"
-    if [ "$p" = luci-app-pon-status ]; then
-      cp -a feeds/pon_userspace/luci-app-pon-status "$PKG_DIR/"
+    # Prefer the feed package when present; otherwise use the checked clone.
+    if [ "$p" = luci-app-pon-status ] &&
+       [ -f "feeds/pon_userspace/$p/Makefile" ]; then
+      cp -a "feeds/pon_userspace/$p" "$PKG_DIR/" || exit 1
     else
-      cp -a "$LUCI_APP_TMP/$p" "$PKG_DIR/"
+      cp -a "$LUCI_APP_TMP/$p" "$PKG_DIR/" || exit 1
+    fi
+    if [ ! -f "$PKG_DIR/$p/Makefile" ]; then
+      echo "::error::$p copy failed: destination Makefile is missing"
+      exit 1
     fi
     echo "✅ 已拷贝: $p  (版本 $(grep -m1 '^PKG_VERSION' "$PKG_DIR/$p/Makefile" 2>/dev/null | sed 's/PKG_VERSION:=//'))"
   done
