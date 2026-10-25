@@ -11,7 +11,12 @@ on:
           - both
           - an7581
           - an7583
-        default: both
+        default: an7583
+      use_onu:
+        description: 'Use naoki66 ONU userspace stack (changes firmware; re-test before publishing)'
+        required: true
+        type: boolean
+        default: false
       publish_release:
         description: 'Publish Release after successful build (turn on after validation)'
         required: true
@@ -76,6 +81,7 @@ jobs:
           # None of the profiles in this workflow is the HM2004-DU FTTR device.
           PROFILE: multi-${{ matrix.soc }}
           ADD_FTTR: 'false'
+          USE_ONU: ${{ inputs.use_onu }}
         run: |
           set -euo pipefail
           cp -a "$GITHUB_WORKSPACE/scripts/." ./scripts/
@@ -83,8 +89,20 @@ jobs:
           cp -a "$GITHUB_WORKSPACE/files/." ./files/
           # DIY package replacement removes installed feed symlinks.
           # Install feeds first so package/feeds exists and replacements win.
+          if [ "$USE_ONU" = true ]; then
+            # Same complete userspace feed and firewall4 patch as build-ponwrt.yml.
+            sed -i '/^src-git\(-full\)\? pon_userspace /d' feeds.conf.default
+            echo 'src-git pon_userspace https://github.com/naoki66/OpenWrt_ONU_CONFIG.git^3cb13560459f1d51136dac662baa1f399028b2b4' >> feeds.conf.default
+          fi
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          if [ "$USE_ONU" = true ]; then
+            test -f feeds/pon_userspace/luci-app-onu/Makefile
+            test -f feeds/pon_userspace/patches/firewall4/010-fw4-zone-device-flowtable.patch
+            mkdir -p package/network/config/firewall4/patches
+            cp feeds/pon_userspace/patches/firewall4/010-fw4-zone-device-flowtable.patch \
+              package/network/config/firewall4/patches/999-onu-zone-device-flowtable.patch
+          fi
           bash "$GITHUB_WORKSPACE/diy-part1.sh"
 
       - name: Combine device configs into single subtarget build
@@ -92,13 +110,28 @@ jobs:
         working-directory: openwrt
         env:
           SOC: ${{ matrix.soc }}
+          USE_ONU: ${{ inputs.use_onu }}
         run: |
           set -euo pipefail
           python3 "$GITHUB_WORKSPACE/scripts/make-multiprofile-config.py" \
             "$SOC" --configs "$GITHUB_WORKSPACE/configs" --output .config
+          if [ "$USE_ONU" = true ]; then
+            for package in luci-app-onu luci-i18n-onu-zh-cn airoha-pond airoha-ponctl airoha-pon-debug; do
+              sed -i "/^CONFIG_PACKAGE_${package}=/d; /^# CONFIG_PACKAGE_${package} is not set/d" .config
+              echo "CONFIG_PACKAGE_${package}=y" >> .config
+            done
+          fi
           # Keep the original P3TERX DIY order: run part2 after .config exists.
           bash "$GITHUB_WORKSPACE/diy-part2.sh"
           make defconfig
+          if [ "$USE_ONU" = true ]; then
+            for package in luci-app-onu airoha-pond airoha-ponctl airoha-pon-debug; do
+              grep -Fxq "CONFIG_PACKAGE_${package}=y" .config || {
+                echo "::error::Required ONU package removed by defconfig: $package"
+                exit 1
+              }
+            done
+          fi
           bash "$GITHUB_WORKSPACE/scripts/verify-multiprofile.sh" "$SOC"
           echo 'Effective device selection:'
           grep -E '^CONFIG_TARGET_(MULTI_PROFILE|DEVICE_airoha_)' .config
@@ -131,10 +164,31 @@ jobs:
             --output "release/$SOC"
           find "release/$SOC" -maxdepth 1 -type f -printf '%f\n' | sort
 
+      - name: Prepare timestamped images and release description
+        id: release_info
+        shell: bash
+        env:
+          SOC: ${{ matrix.soc }}
+          SOURCE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python3 scripts/make-multiprofile-release.py "$SOC" \
+            --images "openwrt/bin/targets/airoha/$SOC" \
+            --stage "release/$SOC" --metadata "release-metadata/$SOC" \
+            --github-output "$GITHUB_OUTPUT"
+          {
+            echo
+            echo "源码：https://github.com/pbs05/ponwrt"
+            echo "分支：master"
+            echo "源码提交：$(git -C openwrt rev-parse HEAD)"
+            echo "构建记录：$SOURCE_RUN_URL"
+          } >> "release-metadata/$SOC/release-notes.md"
+          cat "release-metadata/$SOC/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload firmware artifact (only sysupgrade files)
         uses: actions/upload-artifact@v4
         with:
-          name: PonWrt-${{ matrix.soc }}-sysupgrade
+          name: PonWrt-${{ matrix.soc }}-${{ steps.release_info.outputs.stamp }}-sysupgrade
           path: release/${{ matrix.soc }}/*
           if-no-files-found: error
           retention-days: 7
@@ -143,10 +197,8 @@ jobs:
         if: ${{ inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: multi-${{ matrix.soc }}-${{ github.run_number }}
-          name: "PonWrt ${{ matrix.soc }} multi-profile #${{ github.run_number }}"
-          body: |
-            One build per subtarget. Contains ONLY sysupgrade images.
-            Verify the exact hardware profile, flash layout and bootloader before upgrading.
+          tag_name: multi-${{ matrix.soc }}-${{ steps.release_info.outputs.stamp }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.release_info.outputs.title }}
+          body_path: release-metadata/${{ matrix.soc }}/release-notes.md
           files: release/${{ matrix.soc }}/*
           fail_on_unmatched_files: true
