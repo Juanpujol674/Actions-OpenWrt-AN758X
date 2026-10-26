@@ -582,9 +582,10 @@ jobs:
           # 按分支 + 周号：同一周内复用同一条目。
           # 原先用 github.run_number → 每次运行都 save 一份新副本，
           # 10GB 配额会被迅速刷满并淘汰掉有用的旧缓存。
-          key: ponwrt-dl-${{ env.SOURCE }}-${{ inputs.branch || 'master' }}-${{ steps.resolve.outputs.week }}
+          # v2 不再读取旧清理逻辑可能损坏的 Go 模块缓存。
+          key: ponwrt-dl-v2-${{ env.SOURCE }}-${{ inputs.branch || 'master' }}-${{ steps.resolve.outputs.week }}
           restore-keys: |
-            ponwrt-dl-${{ env.SOURCE }}-${{ inputs.branch || 'master' }}-
+            ponwrt-dl-v2-${{ env.SOURCE }}-${{ inputs.branch || 'master' }}-
           # 关键：即使后面编译失败也要保住已下载的源码包
           save-always: true
 
@@ -836,8 +837,8 @@ jobs:
 
           # 清理下载失败残留的小文件，否则解压时报 "does not look like a tar archive"
           echo "--- 清理损坏的下载包 ---"
-          find dl -size -1024c -type f -exec ls -l {} \; 2>/dev/null
-          find dl -size -1024c -type f -exec rm -f {} \; 2>/dev/null
+          # Go 模块缓存中有合法的小文件；只清理 dl 顶层下载包。
+          find dl -maxdepth 1 -type f -size -1024c -print -delete
 
           echo "dl 目录共 $(ls -1 dl 2>/dev/null | wc -l) 个文件"
           ls -lh dl 2>/dev/null | head -20
@@ -1068,8 +1069,8 @@ jobs:
             sleep 5
           done
           # 清理下载失败残留的小文件
-          find dl -size -1024c -type f -exec ls -l {} \; 2>/dev/null
-          find dl -size -1024c -type f -exec rm -f {} \; 2>/dev/null
+          # Go 模块缓存中有合法的小文件；只清理 dl 顶层下载包。
+          find dl -maxdepth 1 -type f -size -1024c -print -delete
           echo "dl 目录共 $(ls -1 dl 2>/dev/null | wc -l) 个文件"
 
       # =========================================================

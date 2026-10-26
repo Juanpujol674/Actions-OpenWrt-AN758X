@@ -76,7 +76,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt/dl
-          key: ponwrt-dl-${{ runner.os }}-${{ hashFiles('openwrt/feeds.conf.default') }}
+          # v2 skips caches whose Go sources may have been deleted by old cleanup.
+          key: ponwrt-dl-v2-${{ runner.os }}-${{ hashFiles('openwrt/feeds.conf.default') }}
 
       - name: Run existing DIY plugin preparation
         shell: bash
@@ -146,7 +147,8 @@ jobs:
         run: |
           set -euo pipefail
           make -j4 download
-          find dl -type f -size -1024c -delete || true
+          # Go module sources live below dl/go-mod-cache; never recurse into them.
+          find dl -maxdepth 1 -type f -size -1024c -print -delete
 
       - name: Build all selected devices in ONE make
         shell: bash
