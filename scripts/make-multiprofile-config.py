@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Make a conservative OpenWrt multi-profile .config from existing device configs.
+"""Merge OpenWrt device configs into a safe per-device-rootfs multi-profile config.
 
-This refuses conflicting global settings rather than silently modifying the
-contents of another device's rootfs. Run from the CI repository root.
+Packages that are universal remain CONFIG_PACKAGE_foo=y. Packages required by
+only a subset are built as modules (=m) and included only in those devices via
+CONFIG_TARGET_DEVICE_PACKAGES_... .  Non-package setting conflicts are errors.
 """
 import argparse
 from collections import defaultdict
@@ -20,34 +21,43 @@ PROFILES = {
 }
 
 SETTING = re.compile(r'^(CONFIG_[A-Za-z0-9_\-]+)=(.*)$')
-UNSET = re.compile(r'^# (CONFIG_[A-Za-z0-9_\-]+) is not set$')
+UNSET = re.compile(r'^# (CONFIG_[A-Za-z0-9_\-]+) is not set(?:\s*#.*)?$')
 
 
 def parse(path):
     result = {}
-    for line in path.read_text(encoding='utf-8').splitlines():
-        line = line.strip()
-        match = SETTING.fullmatch(line)
-        if match:
-            key, value = match.groups()
+    for no, raw in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+        line = raw.strip()
+        found = SETTING.fullmatch(line)
+        if found:
+            key, value = found.groups()
+            # Some configs contain human-readable inline comments following '=y'.
+            # These comments must NOT become part of the Kconfig value.
+            if not value.startswith('"'):
+                value = value.split(' #', 1)[0].strip()
+            elif value.endswith('"') is False:
+                # Keep quoted options with trailing comments intact up to last '"'.
+                ending = value.rfind('"')
+                if ending > 0:
+                    value = value[:ending + 1]
+            if not value:
+                sys.exit(f'ERROR: empty Kconfig value: {path}:{no} {key}')
         else:
-            match = UNSET.fullmatch(line)
-            if not match:
+            found = UNSET.fullmatch(line)
+            if not found:
                 continue
-            key, value = match.group(1), 'n'
+            key, value = found.group(1), 'n'
         result[key] = value
     return result
 
 
-def is_selector(key):
-    if not key.startswith('CONFIG_TARGET_'):
-        return False
-    if key.startswith(('CONFIG_TARGET_ROOTFS_', 'CONFIG_TARGET_INITRAMFS_',
-                       'CONFIG_TARGET_PER_DEVICE_ROOTFS', 'CONFIG_TARGET_SQUASHFS_',
-                       'CONFIG_TARGET_EXT4FS_', 'CONFIG_TARGET_UBIFS_')):
-        return False
-    # Includes TARGET_<board> and TARGET_DEVICE_<board>_DEVICE_<name>
-    return True
+def selected_target(key):
+    """Only target selection keys, not target image or filesystem options."""
+    return (key in {'CONFIG_TARGET_airoha', 'CONFIG_TARGET_airoha_an7581',
+                    'CONFIG_TARGET_airoha_an7583', 'CONFIG_TARGET_MULTI_PROFILE',
+                    'CONFIG_TARGET_PER_DEVICE_ROOTFS', 'CONFIG_TARGET_ALL_PROFILES'}
+            or key.startswith('CONFIG_TARGET_DEVICE_')
+            or key.startswith('CONFIG_TARGET_PROFILE'))
 
 
 def emit(key, value):
@@ -55,67 +65,99 @@ def emit(key, value):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('soc', choices=PROFILES)
-    parser.add_argument('--configs', type=Path, default=Path('configs'))
-    parser.add_argument('--output', type=Path, required=True)
-    args = parser.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument('soc', choices=PROFILES)
+    p.add_argument('--configs', type=Path, default=Path('configs'))
+    p.add_argument('--output', type=Path, required=True)
+    args = p.parse_args()
 
-    data = {}
-    for profile in PROFILES[args.soc]:
+    names = PROFILES[args.soc]
+    sources = {}
+    for profile in names:
         path = args.configs / (profile + '.config')
         if not path.is_file():
             sys.exit(f'ERROR: missing config: {path}')
-        data[profile] = parse(path)
+        sources[profile] = parse(path)
 
-    # Preserve per-device package declarations separately (if they exist).
-    device_packages = {}
-    global_settings = defaultdict(dict)
-    for profile, cfg in data.items():
-        for key, value in cfg.items():
-            if key.startswith('CONFIG_TARGET_DEVICE_PACKAGES_'):
-                suffix = f'airoha_{args.soc}_DEVICE_{profile}'
-                if key == 'CONFIG_TARGET_DEVICE_PACKAGES_' + suffix:
-                    device_packages[key] = value
+    extra_keys = {name: f'CONFIG_TARGET_DEVICE_PACKAGES_airoha_{args.soc}_DEVICE_{name}'
+                  for name in names}
+    # All non-package settings must agree whenever they are explicitly set.
+    shared = defaultdict(dict)
+    packages = set()
+    for name, cfg in sources.items():
+        for key, val in cfg.items():
+            if key.startswith('CONFIG_TARGET_DEVICE_PACKAGES_') or selected_target(key):
                 continue
-            if not is_selector(key):
-                global_settings[key][profile] = value
-
+            if key.startswith('CONFIG_PACKAGE_'):
+                packages.add(key)
+            else:
+                shared[key][name] = val
     conflicts = []
-    for key, values in sorted(global_settings.items()):
-        distinct = set(values.values())
-        # Missing symbols in a minimal diffconfig are unknown, not 'n'.
-        if len(distinct) > 1:
-            summary = ', '.join(f'{p}={v}' for p, v in sorted(values.items()))
-            conflicts.append(f'{key}: {summary}')
+    for key, values in sorted(shared.items()):
+        if len(set(values.values())) > 1:
+            conflicts.append(f'{key}: ' + ', '.join(f'{n}={v}' for n, v in sorted(values.items())))
     if conflicts:
-        print('ERROR: configurations disagree on global settings.', file=sys.stderr)
-        print('A single build has a shared global package selection. Resolve',
-              'these first, rather than risk changing a device firmware.', file=sys.stderr)
+        print('ERROR: non-package build settings differ; cannot safely merge.', file=sys.stderr)
         print('\n'.join(conflicts[:80]), file=sys.stderr)
         if len(conflicts) > 80:
-            print(f'... and {len(conflicts)-80} more conflicts', file=sys.stderr)
+            print(f'... plus {len(conflicts)-80} more', file=sys.stderr)
         sys.exit(2)
 
-    settings = {k: next(iter(v.values())) for k, v in global_settings.items()}
-    settings.update({
+    merged = {key: next(iter(values.values())) for key, values in shared.items()}
+    merged.update({
         'CONFIG_TARGET_airoha': 'y',
-        'CONFIG_TARGET_airoha_' + args.soc: 'y',
+        f'CONFIG_TARGET_airoha_{args.soc}': 'y',
         'CONFIG_TARGET_MULTI_PROFILE': 'y',
         'CONFIG_TARGET_PER_DEVICE_ROOTFS': 'y',
+        'CONFIG_TARGET_ALL_PROFILES': 'n',
         'CONFIG_TARGET_ROOTFS_INITRAMFS': 'n',
     })
-    for profile in PROFILES[args.soc]:
-        settings[f'CONFIG_TARGET_DEVICE_airoha_{args.soc}_DEVICE_{profile}'] = 'y'
-    settings.update(device_packages)
+    for name in names:
+        merged[f'CONFIG_TARGET_DEVICE_airoha_{args.soc}_DEVICE_{name}'] = 'y'
+
+    additions = {name: [] for name in names}
+    per_device_count = 0
+    for key in sorted(packages):
+        # Missing =n is an intentional choice for device-specific config stubs.
+        options = {name: sources[name].get(key, 'n') for name in names}
+        invalid = {v for v in options.values() if v not in {'y', 'm', 'n'}}
+        if invalid:
+            sys.exit(f'ERROR: package {key} has unexpected value(s): {invalid}')
+        if all(v == 'y' for v in options.values()):
+            merged[key] = 'y'
+        elif any(v == 'y' for v in options.values()):
+            # A built-as-module package can be installed in individual images.
+            merged[key] = 'm'
+            per_device_count += 1
+            package_name = key[len('CONFIG_PACKAGE_'):]
+            for name, value in options.items():
+                if value == 'y':
+                    additions[name].append(package_name)
+        elif any(v == 'm' for v in options.values()):
+            merged[key] = 'm'
+        # All-n symbols are omitted so OpenWrt can apply normal defaults.
+
+    for name in names:
+        original = sources[name].get(extra_keys[name], '""')
+        if not (original.startswith('"') and original.endswith('"')):
+            sys.exit(f'ERROR: malformed {extra_keys[name]}: {original!r}')
+        tokens = original[1:-1].split()
+        for pkg in additions[name]:
+            tokens = [tok for tok in tokens if tok != f'-{pkg}']
+            if pkg not in tokens:
+                tokens.append(pkg)
+        merged[extra_keys[name]] = '"' + ' '.join(tokens) + '"'
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    content = ('# Generated from configs/<device>.config; do not edit by hand.\n'
-               + '\n'.join(emit(key, val) for key, val in sorted(settings.items()))
-               + '\n')
-    args.output.write_text(content, encoding='utf-8')
-    print(f'Generated {args.output} from {len(data)} {args.soc} profiles')
-    print('\n'.join('  ' + p for p in PROFILES[args.soc]))
+    args.output.write_text(
+        '# Generated from configs/<device>.config; do not edit by hand.\n'
+        + '\n'.join(emit(key, val) for key, val in sorted(merged.items())) + '\n',
+        encoding='utf-8'
+    )
+    print(f'Generated {args.output}: {args.soc}, {len(names)} devices;'
+          f' {per_device_count} packages allocated per device')
+    for name in names:
+        print(f'  {name}: {len(additions[name])} additional device packages')
 
 
 if __name__ == '__main__':

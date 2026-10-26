@@ -7,6 +7,7 @@ case "$soc" in
   *) echo "Unsupported subtarget: $soc" >&2; exit 2 ;;
 esac
 grep -Fxq 'CONFIG_TARGET_MULTI_PROFILE=y' .config || { echo 'Multi-profile not enabled after make defconfig' >&2; exit 1; }
+grep -Fxq 'CONFIG_TARGET_PER_DEVICE_ROOTFS=y' .config || { echo 'Per-device rootfs not enabled; hardware-specific packages may leak across devices' >&2; exit 1; }
 grep -Fxq "CONFIG_TARGET_airoha_${soc}=y" .config || { echo 'Wrong subtarget' >&2; exit 1; }
 for profile in "${profiles[@]}"; do
   key="CONFIG_TARGET_DEVICE_airoha_${soc}_DEVICE_${profile}=y"

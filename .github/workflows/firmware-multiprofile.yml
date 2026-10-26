@@ -37,6 +37,10 @@ jobs:
     name: firmware (${{ matrix.soc }}) / build
     runs-on: ubuntu-24.04
     timeout-minutes: 350
+    env:
+      # Bound Go build concurrency while retaining verbose failure diagnostics.
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=1'
     strategy:
       fail-fast: false
       matrix:
@@ -149,9 +153,19 @@ jobs:
         working-directory: openwrt
         run: |
           set -euo pipefail
-          # One complete make for the whole subtarget. Device image generation
-          # is handled by the OpenWrt multi-profile image rules.
-          make -j4
+          # Keep the diagnostic log even on failure, and reproduce yq failures
+          # with serial verbose output to reveal the underlying compiler error.
+          bash "$GITHUB_WORKSPACE/scripts/build-with-diagnostics.sh" 2
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PonWrt-${{ matrix.soc }}-diagnostics
+          path: |
+            openwrt/.ci-logs/*
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Stage sysupgrade-only firmware
         shell: bash
