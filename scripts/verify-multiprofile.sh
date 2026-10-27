@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 soc="${1:?Usage: verify-multiprofile.sh an7581|an7583}"
-case "$soc" in
-  an7581) profiles=(fiberhome_hg5382a fiberhome_hg5585f-ct fiberhome_hg5585f-cu gemtek_xg2010g nokia_xg-040g-md-ubi nokia_xg-040g-tf-ubi unionman_ung00a znxt_zn504xg-d znxt_zn515xg-d) ;;
-  an7583) profiles=(nokia_xg-040g-mf nokia_xg-040g-mf-ubi) ;;
-  *) echo "Unsupported subtarget: $soc" >&2; exit 2 ;;
-esac
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+profiles_text="$(python3 "$script_dir/device_profiles.py" "$soc")"
+mapfile -t profiles <<< "$profiles_text"
 grep -Fxq 'CONFIG_TARGET_MULTI_PROFILE=y' .config || { echo 'Multi-profile not enabled after make defconfig' >&2; exit 1; }
 grep -Fxq 'CONFIG_TARGET_PER_DEVICE_ROOTFS=y' .config || { echo 'Per-device rootfs not enabled; hardware-specific packages may leak across devices' >&2; exit 1; }
 grep -Fxq "CONFIG_TARGET_airoha_${soc}=y" .config || { echo 'Wrong subtarget' >&2; exit 1; }

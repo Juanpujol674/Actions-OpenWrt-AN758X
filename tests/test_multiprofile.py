@@ -9,6 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'scripts/make-multiprofile-config.py'
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location('multi', SCRIPT)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -44,7 +45,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertEqual(cfg['CONFIG_PACKAGE_busybox'], 'y')
         self.assertIn('kmod-mt7915e', cfg['CONFIG_TARGET_DEVICE_PACKAGES_airoha_an7581_DEVICE_fiberhome_hg5585f-cu'])
         self.assertNotIn('kmod-mt7915e', cfg['CONFIG_TARGET_DEVICE_PACKAGES_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi'])
-        self.assertEqual(len([x for x in cfg if x.startswith('CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_')]), 9)
+        self.assertEqual(len([x for x in cfg if x.startswith('CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_')]), 14)
 
     def test_mixed_y_and_m_with_existing_packages(self):
         a, b = module.PROFILES['an7583']

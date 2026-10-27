@@ -10,15 +10,8 @@ from collections import defaultdict
 from pathlib import Path
 import re
 import sys
-
-PROFILES = {
-    'an7581': [
-        'fiberhome_hg5382a', 'fiberhome_hg5585f-ct', 'fiberhome_hg5585f-cu',
-        'gemtek_xg2010g', 'nokia_xg-040g-md-ubi', 'nokia_xg-040g-tf-ubi',
-        'unionman_ung00a', 'znxt_zn504xg-d', 'znxt_zn515xg-d',
-    ],
-    'an7583': ['nokia_xg-040g-mf', 'nokia_xg-040g-mf-ubi'],
-}
+from device_profiles import (PROFILES, CONFIG_SOURCES,
+                             COMMON_SOFTWARE_PROFILES, PRIVATE_FTTR_PACKAGES)
 
 SETTING = re.compile(r'^(CONFIG_[A-Za-z0-9_\-]+)=(.*)$')
 UNSET = re.compile(r'^# (CONFIG_[A-Za-z0-9_\-]+) is not set(?:\s*#.*)?$')
@@ -69,15 +62,54 @@ def main():
     p.add_argument('soc', choices=PROFILES)
     p.add_argument('--configs', type=Path, default=Path('configs'))
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--source-image-dir', type=Path,
+                   help='Check selected profiles exist in the cloned source')
     args = p.parse_args()
 
     names = PROFILES[args.soc]
+    if args.source_image_dir:
+        image_makefile = args.source_image_dir / (args.soc + '.mk')
+        available = set(re.findall(r'^TARGET_DEVICES\s*\+=\s*(\S+)\s*$',
+                                   image_makefile.read_text(encoding='utf-8'), re.M))
+        missing = set(names) - available
+        if missing:
+            sys.exit('ERROR: source lacks selected device(s): ' + ', '.join(sorted(missing)))
     sources = {}
     for profile in names:
-        path = args.configs / (profile + '.config')
+        if profile in COMMON_SOFTWARE_PROFILES:
+            continue
+        config_profile = CONFIG_SOURCES.get(profile, profile)
+        path = args.configs / (config_profile + '.config')
         if not path.is_file():
             sys.exit(f'ERROR: missing config: {path}')
         sources[profile] = parse(path)
+        if config_profile != profile:
+            old_key = f'CONFIG_TARGET_DEVICE_PACKAGES_airoha_{args.soc}_DEVICE_{config_profile}'
+            new_key = f'CONFIG_TARGET_DEVICE_PACKAGES_airoha_{args.soc}_DEVICE_{profile}'
+            sources[profile][new_key] = sources[profile].get(old_key, '""')
+
+    for cfg in sources.values():
+        for key in list(cfg):
+            if key.startswith('CONFIG_FTTR_'):
+                del cfg[key]
+        for package in PRIVATE_FTTR_PACKAGES:
+            cfg.pop('CONFIG_PACKAGE_' + package, None)
+        for key, value in list(cfg.items()):
+            if key.startswith('CONFIG_TARGET_DEVICE_PACKAGES_'):
+                tokens = value.strip('"').split()
+                cfg[key] = '"' + ' '.join(t for t in tokens
+                                         if t.lstrip('-') not in PRIVATE_FTTR_PACKAGES) + '"'
+
+    # Add boards without local config stubs using the intersection of existing
+    # package selections. Hardware packages remain upstream device defaults.
+    common_packages = {
+        key: 'y' for key in next(iter(sources.values()))
+        if key.startswith('CONFIG_PACKAGE_')
+        and all(cfg.get(key) == 'y' for cfg in sources.values())
+    }
+    for profile in names:
+        if profile in COMMON_SOFTWARE_PROFILES:
+            sources[profile] = dict(common_packages)
 
     extra_keys = {name: f'CONFIG_TARGET_DEVICE_PACKAGES_airoha_{args.soc}_DEVICE_{name}'
                   for name in names}
