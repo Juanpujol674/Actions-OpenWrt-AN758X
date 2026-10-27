@@ -1,0 +1,21 @@
+name: Check multi-profile image selection
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'configs/**'
+      - 'tests/**'
+      - '.github/workflows/check-multiprofile.yml'
+      - '.github/workflows/firmware-multiprofile.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check profile selection and staged image completeness
+        run: python3 -m unittest discover -s tests -v
+      - name: Check verification script syntax
+        run: bash -n scripts/verify-multiprofile.sh

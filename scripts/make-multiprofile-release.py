@@ -60,6 +60,12 @@ def prepare(images, stage, soc, metadata, timestamp=None):
                          '产物清单未发现 luci-app-onu'), '',
         '仅包含 sysupgrade 升级镜像，不包含首次刷机或救砖镜像。',
     ]
+    if soc == 'an7581':
+        body += [
+            'HG5585F CT/CU、XG-040G-MD 各含普通版与 USB-SFP 版；USB-SFP 使用独立设备树，不是仅增加 USB 驱动。',
+            'W1700K（UBI）、HM2004-DU 也包含在本平台包内。W1700K 首次迁移所需 chainload-uboot 不在此升级包内。',
+            'HM2004-DU 不包含需私有仓库授权的 FMCS/FTTR 套件。',
+        ]
     if soc == 'an7583':
         body += ['普通版 nokia_xg-040g-mf 使用 .bin；UBI 版 nokia_xg-040g-mf-ubi 使用 .itb，二者不可混刷。',
                  '测试记录：此前版本的 UBI 镜像已由用户刷机验证；本次新构建及其他机型仍需分别验证。']

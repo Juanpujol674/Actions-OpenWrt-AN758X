@@ -83,7 +83,7 @@ jobs:
         shell: bash
         working-directory: openwrt
         env:
-          # None of the profiles in this workflow is the HM2004-DU FTTR device.
+          # Public firmware only, including HM2004-DU without its private FTTR feed.
           PROFILE: multi-${{ matrix.soc }}
           ADD_FTTR: 'false'
           USE_ONU: ${{ inputs.use_onu }}
@@ -119,7 +119,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 "$GITHUB_WORKSPACE/scripts/make-multiprofile-config.py" \
-            "$SOC" --configs "$GITHUB_WORKSPACE/configs" --output .config
+            "$SOC" --configs "$GITHUB_WORKSPACE/configs" --output .config \
+            --source-image-dir target/linux/airoha/image
           if [ "$USE_ONU" = true ]; then
             for package in luci-app-onu luci-i18n-onu-zh-cn airoha-pond airoha-ponctl airoha-pon-debug; do
               sed -i "/^CONFIG_PACKAGE_${package}=/d; /^# CONFIG_PACKAGE_${package} is not set/d" .config

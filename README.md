@@ -1,5 +1,7 @@
 > 本 Fork 的全家桶编译入口、替换步骤与定时编译说明见 [CLOUD-BUILD.zh-CN.md](CLOUD-BUILD.zh-CN.md)。
 
+> 当前 **PonWrt Multi-profile** 的 16 个升级镜像、USB-SFP 变体与分区区别见 [多机型 USB-SFP 清单](docs/MULTIPROFILE-USB-SFP.zh-CN.md)。
+
 # PonWrt CI — Airoha AN758x PON 云编译
 
 基于 P3TERX `Actions-OpenWrt` 模板重构，源码指向 [pbs05/ponwrt](https://github.com/pbs05/ponwrt)（默认分支 `master`），

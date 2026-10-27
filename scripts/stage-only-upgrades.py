@@ -4,18 +4,7 @@ import argparse
 from pathlib import Path
 import shutil
 import sys
-
-PROFILES = {
-    'an7581': [
-        'fiberhome_hg5382a', 'fiberhome_hg5585f-ct', 'fiberhome_hg5585f-cu',
-        'gemtek_xg2010g', 'nokia_xg-040g-md-ubi', 'nokia_xg-040g-tf-ubi',
-        'unionman_ung00a', 'znxt_zn504xg-d', 'znxt_zn515xg-d',
-    ],
-    'an7583': ['nokia_xg-040g-mf', 'nokia_xg-040g-mf-ubi'],
-}
-# Important upstream exception: nokia_xg-040g-mf produces sysupgrade.bin
-# while nokia_xg-040g-mf-ubi produces sysupgrade.itb.
-EXTENSION = {('an7583', 'nokia_xg-040g-mf'): 'bin'}
+from device_profiles import PROFILES, EXTENSION
 
 
 def main():
