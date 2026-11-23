@@ -166,8 +166,9 @@ jobs:
         with:
           name: PonWrt-${{ matrix.soc }}-diagnostics
           path: |
-            openwrt/.ci-logs/*
-          if-no-files-found: warn
+            openwrt/.ci-logs/
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 7
 
       - name: Stage sysupgrade-only firmware
