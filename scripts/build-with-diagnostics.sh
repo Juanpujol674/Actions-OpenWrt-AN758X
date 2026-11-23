@@ -26,13 +26,40 @@ echo "::error::PonWrt build failed (exit $status); check uploaded CI diagnostics
 if [ -d logs ]; then
   find logs -type f -name '*.txt' | grep -Ei '/(yq|golang)/|compile' | head -n 80 > .ci-logs/possible-compiler-logs.txt || true
   find logs -type f \( -name '*.txt' -o -name '*.log' \) -print0 | \
-    xargs -0 -r grep -IlE '(^|[[:space:]])(error:|fatal:|signal: killed)' 2>/dev/null | \
+    xargs -0 -r grep -IlEi 'error:|fatal:|signal: killed|no space left|too big|too large|cannot find|not found|failed|Error [0-9]' 2>/dev/null | \
     head -n 30 > .ci-logs/error-log-paths.txt || true
   while IFS= read -r file; do
     echo "===== $file =====" >> .ci-logs/compiler-errors.txt
     tail -n 120 "$file" >> .ci-logs/compiler-errors.txt
   done < .ci-logs/error-log-paths.txt
 fi
+
+# Image creation errors are normally hidden by OpenWrt's low-noise output.
+# Re-run only image installation, using the already-built kernel and packages.
+if grep -Fq 'ERROR: target/linux failed to build' "$log"; then
+  echo '::group::Reproduce image installation failure (serial verbose; max 10 minutes)'
+  set +e
+  timeout 600 make -j1 V=sc target/install > .ci-logs/target-install-verbose.log 2>&1
+  retry_status=$?
+  set -e
+  echo "Diagnostic target/install exit: $retry_status (original build exit: $status)"
+  tail -n 240 .ci-logs/target-install-verbose.log
+  echo '::endgroup::'
+fi
+# Keep native image/rootfs logs too: image-size and package-install errors do
+# not necessarily contain a C compiler 'error:' marker.
+if [ -d logs/target ]; then
+  cp -R logs/target .ci-logs/target-logs
+fi
+if [ -d logs/package/install ]; then
+  cp -R logs/package/install .ci-logs/package-install-logs
+fi
+{
+  echo '===== remaining disk space ====='
+  df -h .
+  echo '===== image output sizes ====='
+  du -h bin/targets/airoha/*/* 2>/dev/null || true
+} > .ci-logs/image-environment.txt
 
 if grep -Eq 'package/feeds/packages/yq failed to build' "$log"; then
   echo '::group::Reproduce yq failure with make -j1 V=sc (max 10 minutes)'
