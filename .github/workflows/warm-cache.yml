@@ -48,7 +48,7 @@ on:
       prebuilt_host:
         description: 'host 侧 go/rust/llvm 怎么来（必须与主流程一致，否则预热到另一条缓存线上）'
         required: false
-        default: '预编译'
+        default: '源码编'
         type: choice
         options:
           - '预编译'
@@ -65,9 +65,7 @@ on:
         options:
           - 'true'
           - 'false'
-  schedule:
-    # 每周一 03:17（UTC）—— 兼作缓存保活，别删
-    - cron: '17 3 * * 1'
+  # Scheduled runs are opt-in for this fork.
 
 permissions:
   # 需要 contents: write 才能创建 release / 传资产；actions: write 才能 gh cache delete

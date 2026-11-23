@@ -29,9 +29,7 @@ on:
         description: 'mode=prefix 时要删的前缀（如 ponwrt-pbs05-ponwrt-master-an7581-prebuilt）'
         required: false
         default: ''
-  schedule:
-    # 每周一 04:20（UTC）做一次轮换；只删旧代，不会让缓存归零
-    - cron: '20 4 * * 1'
+  # Scheduled runs are opt-in for this fork.
 
 permissions:
   contents: read

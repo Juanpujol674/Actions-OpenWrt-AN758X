@@ -20,8 +20,8 @@ on:
 env:
   PRIVATE_REPO: ${{ github.event.inputs.private_repo || 'qwe-qaq/openwrt-fttr' }}
   PRIVATE_REPO_BRANCH: ${{ github.event.inputs.private_repo_branch || 'main' }}
-  FTTR_LUCI_REPO: ${{ github.event.inputs.fttr_luci_repo || 'qwe-qaq/luci-app-fttr' }}
-  FTTR_LUCI_BRANCH: ${{ github.event.inputs.fttr_luci_branch || 'main' }}
+  FTTR_LUCI_REPO: LazuliKao/luci-app-fttr
+  FTTR_LUCI_BRANCH: main
 
 # 最小权限：只需要 checkout 本仓库
 permissions:
