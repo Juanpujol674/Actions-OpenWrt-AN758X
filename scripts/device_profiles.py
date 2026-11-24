@@ -34,6 +34,8 @@ COMMON_SOFTWARE_PROFILES = {'gemtek_w1700k-ubi'}
 PRIVATE_FTTR_PACKAGES = {
     'kmod-h3c-fmcs', 'h3c-fmcs-firmware', 'h3c-fttr-tools',
     'luci-app-fttr', 'luci-i18n-fttr-zh-cn',
+    # Current upstream calls the controller openwrt-fttr (formerly h3c-fttr-tools).
+    'openwrt-fttr', 'fttr-tools', 'kmod-fiberhome-fsl',
 }
 
 # The ordinary MF image is a sysupgrade tar wrapped in .bin, not UBI .itb.
