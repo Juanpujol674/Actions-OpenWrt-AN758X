@@ -74,6 +74,19 @@ class MultiprofileImages(unittest.TestCase):
             self.assertNotIn(private, extras)
             self.assertNotIn('CONFIG_PACKAGE_' + private, cfg)
 
+    def test_current_upstream_fttr_names_do_not_reach_public_images(self):
+        # Regression: APK failed on world[openwrt-fttr] after defconfig
+        # removed its unknown CONFIG_PACKAGE symbol but kept the device string.
+        cfg = self.generate('an7581')
+        for package in ('openwrt-fttr', 'fttr-tools', 'kmod-fiberhome-fsl'):
+            self.assertNotIn('CONFIG_PACKAGE_' + package, cfg)
+            for key, value in cfg.items():
+                if key.startswith('CONFIG_TARGET_DEVICE_PACKAGES_'):
+                    self.assertNotIn(package, value.strip('"').split())
+        for package in ('luci-app-onu', 'airoha-pond', 'luci-app-openclash',
+                        'luci-app-nikki', 'luci-app-momo'):
+            self.assertEqual(cfg['CONFIG_PACKAGE_' + package], 'y')
+
     def test_an7583_device_selection_is_unchanged(self):
         cfg = self.generate('an7583')
         selected = {k for k, v in cfg.items()
